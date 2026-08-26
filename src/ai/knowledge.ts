@@ -331,3 +331,28 @@ export const GENERIC_REPLIES = {
   default:
     "Let me anchor this. Say what you already believe about it, even loosely — a half-formed version is far more useful to correct than a blank.\n\nI will then tell you which part holds, which part breaks, and where the boundary is. That boundary is usually the thing worth remembering.",
 }
+
+/** Best-matching topic by trigger hits, or undefined when nothing is close. */
+export function matchTopic(text: string): TopicEntry | undefined {
+  let best: { topic: TopicEntry; hits: number } | undefined
+  for (const topic of TOPICS) {
+    const hits = topic.triggers.reduce((n, re) => n + (re.test(text) ? 1 : 0), 0)
+    if (hits > 0 && (!best || hits > best.hits)) best = { topic, hits }
+  }
+  return best?.topic
+}
+
+/**
+ * Composer suggestions stay deterministic even on the live provider: they are
+ * curated per topic, and spending a model call to regenerate them on every node
+ * switch would buy nothing.
+ */
+export function suggestedPromptsFor(nodeTitle: string): string[] {
+  return (
+    matchTopic(nodeTitle)?.prompts ?? [
+      'Explain this from first principles.',
+      'What do people usually get wrong here?',
+      'Give me a concrete example.',
+    ]
+  )
+}

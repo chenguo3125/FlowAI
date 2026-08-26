@@ -59,6 +59,8 @@ export interface NodeGhost {
 export interface Misconception {
   id: string
   nodeId: string
+  /** Stable rule id, e.g. `hash-always-o1`. Survives instance ids. */
+  claimId: string
   /** The concept the learner tripped on, e.g. "Amortized vs worst-case cost". */
   concept: string
   /** What the learner appears to believe. */

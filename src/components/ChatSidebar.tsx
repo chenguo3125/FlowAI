@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   ArrowUp,
   BadgeCheck,
   ChevronRight,
@@ -24,11 +25,30 @@ export function ChatSidebar() {
   const node = useCanvas(selectSelectedNode)
   const tab = useCanvas((s) => s.sidebarTab)
   const setSidebarTab = useCanvas((s) => s.setSidebarTab)
+  const reviewMode = useCanvas((s) => s.reviewMode)
+  const exitReview = useCanvas((s) => s.exitReview)
   const openForNode = useCanvas((s) =>
     node ? s.misconceptions.filter((m) => m.nodeId === node.id && !m.resolved).length : 0,
   )
 
   if (!node) {
+    if (reviewMode) {
+      return (
+        <SidebarShell>
+          <div className="flex items-center justify-between border-b border-ink-800 px-4 py-3">
+            <p className="text-[12px] font-semibold text-ink-200">Mistake graph</p>
+            <button
+              onClick={() => exitReview()}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11.5px] font-medium text-ink-300 ring-1 ring-ink-700 transition hover:bg-ink-850 hover:text-ink-100"
+            >
+              <ArrowLeft className="size-3" />
+              Back to canvas
+            </button>
+          </div>
+          <MistakePanel />
+        </SidebarShell>
+      )
+    }
     return (
       <SidebarShell>
         <EmptyState />
@@ -61,18 +81,29 @@ export function ChatSidebar() {
           <TabButton active={tab === 'chat'} onClick={() => setSidebarTab('chat')}>
             Micro-chat
           </TabButton>
-          <TabButton active={tab === 'mistakes'} onClick={() => setSidebarTab('mistakes')}>
-            Mistake graph
-            {openForNode > 0 && (
-              <span className="ml-1.5 rounded bg-gap/15 px-1.5 text-[10px] font-semibold text-gap">
-                {openForNode}
-              </span>
-            )}
-          </TabButton>
+          {reviewMode && (
+            <TabButton active={tab === 'mistakes'} onClick={() => setSidebarTab('mistakes')}>
+              Mistake graph
+              {openForNode > 0 && (
+                <span className="ml-1.5 rounded bg-gap/15 px-1.5 text-[10px] font-semibold text-gap">
+                  {openForNode}
+                </span>
+              )}
+            </TabButton>
+          )}
         </div>
+        {reviewMode && (
+          <button
+            onClick={() => exitReview()}
+            className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-ink-400 transition hover:text-ink-200"
+          >
+            <ArrowLeft className="size-3" />
+            Back to canvas
+          </button>
+        )}
       </div>
 
-      {tab === 'chat' ? <ChatPane key={node.id} /> : <MistakePanel />}
+      {tab === 'chat' || !reviewMode ? <ChatPane key={node.id} /> : <MistakePanel />}
     </SidebarShell>
   )
 }

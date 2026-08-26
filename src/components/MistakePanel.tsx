@@ -1,4 +1,4 @@
-import { BadgeCheck, CircleDot, Crosshair, Quote, ScanSearch, Wrench } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, CircleDot, Crosshair, Quote, ScanSearch, Wrench } from 'lucide-react'
 import { useCallback, useState } from 'react'
 
 import { plural, relativeTime } from '@/lib/text'
@@ -11,6 +11,7 @@ export function MistakePanel() {
   const selectedNodeId = useCanvas((s) => s.selectedNodeId)
   const analyzing = useCanvas((s) => s.analyzing)
   const runAnalyzer = useCanvas((s) => s.runAnalyzer)
+  const exitReview = useCanvas((s) => s.exitReview)
   const selectNode = useCanvas((s) => s.selectNode)
   const nodes = useCanvas((s) => s.nodes)
   const titleOf = useCallback(
@@ -35,6 +36,13 @@ export function MistakePanel() {
           colours the affected nodes, and grows a correction sub-node for each gap.
         </p>
         <button
+          onClick={() => exitReview()}
+          className="inline-flex items-center gap-1.5 text-[12px] font-medium text-ink-400 transition hover:text-ink-100"
+        >
+          <ArrowLeft className="size-3.5" />
+          Back to canvas
+        </button>
+        <button
           disabled={analyzing}
           onClick={() => void runAnalyzer()}
           className="mt-1 inline-flex items-center gap-2 rounded-lg bg-gap/15 px-3 py-2 text-[12px] font-semibold text-gap ring-1 ring-gap/35 transition hover:bg-gap/25 disabled:opacity-50"
@@ -50,11 +58,20 @@ export function MistakePanel() {
     <div className="scrollbar-slim flex-1 overflow-y-auto px-4 py-4">
       {lastRun && (
         <div className="mb-4 rounded-xl bg-ink-850/60 px-3 py-2.5 ring-1 ring-ink-800">
-          <div className="flex items-center gap-2">
-            <CircleDot className="size-3 text-accent" />
-            <span className="text-[11.5px] font-medium text-ink-200">
-              Last sweep {relativeTime(lastRun.ranAt)}
-            </span>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <CircleDot className="size-3 text-accent" />
+              <span className="text-[11.5px] font-medium text-ink-200">
+                Last sweep {relativeTime(lastRun.ranAt)}
+              </span>
+            </div>
+            <button
+              onClick={() => exitReview()}
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-ink-400 ring-1 ring-ink-700 transition hover:bg-ink-800 hover:text-ink-100"
+            >
+              <ArrowLeft className="size-3" />
+              Back
+            </button>
           </div>
           <p className="mt-1 text-[11px] text-ink-500">
             Read {plural(lastRun.messagesScanned, 'message')} across{' '}

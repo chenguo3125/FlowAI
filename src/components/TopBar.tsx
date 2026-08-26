@@ -1,7 +1,9 @@
 import { useReactFlow } from '@xyflow/react'
-import { Monitor, Moon, Plus, RotateCcw, ScanSearch, Sun, Workflow } from 'lucide-react'
+import { ArrowLeft, Monitor, Moon, Plus, RotateCcw, ScanSearch, Sun, Workflow } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
+import { provider } from '@/ai/provider'
+import { firebaseEnabled } from '@/data/firebase'
 import { plural } from '@/lib/text'
 import { useCanvas } from '@/store/canvasStore'
 import { useTheme, type ThemePref } from '@/store/themeStore'
@@ -10,7 +12,11 @@ export function TopBar() {
   const nodes = useCanvas((s) => s.nodes)
   const misconceptions = useCanvas((s) => s.misconceptions)
   const analyzing = useCanvas((s) => s.analyzing)
+  const reviewMode = useCanvas((s) => s.reviewMode)
+  const lastRun = useCanvas((s) => s.lastRun)
   const runAnalyzer = useCanvas((s) => s.runAnalyzer)
+  const enterReview = useCanvas((s) => s.enterReview)
+  const exitReview = useCanvas((s) => s.exitReview)
   const addNode = useCanvas((s) => s.addNode)
   const resetCanvas = useCanvas((s) => s.resetCanvas)
 
@@ -49,7 +55,7 @@ export function TopBar() {
         <div>
           <div className="text-[13.5px] leading-tight font-semibold text-ink-100">FlowAI</div>
           <div className="text-[10.5px] leading-tight text-ink-500">
-            Asymmetric learning canvas
+            {firebaseEnabled() ? 'Canvas syncs to Firestore' : 'Canvas saved in this browser'}
           </div>
         </div>
       </div>
@@ -68,6 +74,13 @@ export function TopBar() {
       )}
 
       <div className={`flex items-center gap-2 ${toast ? '' : 'ml-auto'}`}>
+        <span
+          className="hidden max-w-[11rem] truncate text-[11px] text-ink-500 sm:inline"
+          title={provider.label}
+        >
+          {provider.label}
+        </span>
+
         <ThemeSwitch />
 
         <button
@@ -84,6 +97,26 @@ export function TopBar() {
           New node
         </button>
 
+        {reviewMode ? (
+          <button
+            onClick={() => exitReview()}
+            className="inline-flex items-center gap-2 rounded-lg bg-ink-850 px-3 py-1.5 text-[12px] font-semibold text-ink-100 ring-1 ring-ink-600 transition hover:bg-ink-800"
+            title="Hide fix nodes and status colours; findings stay saved"
+          >
+            <ArrowLeft className="size-3.5" />
+            Back to canvas
+          </button>
+        ) : lastRun ? (
+          <button
+            onClick={() => enterReview()}
+            className="inline-flex items-center gap-2 rounded-lg bg-gap/15 px-3 py-1.5 text-[12px] font-semibold text-gap ring-1 ring-gap/35 transition hover:bg-gap/25"
+            title="Show detected gaps, status colours, and generated fix nodes"
+          >
+            <ScanSearch className="size-3.5" />
+            Review gaps
+          </button>
+        ) : null}
+
         <button
           onClick={() => void analyze()}
           disabled={analyzing}
@@ -91,18 +124,23 @@ export function TopBar() {
           title="Sweep every transcript on the canvas for cognitive gaps"
         >
           <ScanSearch className={`size-3.5 ${analyzing ? 'animate-spin' : ''}`} />
-          {analyzing ? 'Analyzing canvas…' : 'Run misconception analyzer'}
+          {analyzing ? 'Analyzing canvas…' : reviewMode || lastRun ? 'Re-run analyzer' : 'Run misconception analyzer'}
         </button>
 
         <button
           onClick={() => {
+            const ok = window.confirm(
+              'Reset the canvas to the original demo? This discards your nodes, chats, and threads in this browser and in Firestore.',
+            )
+            if (!ok) return
             resetCanvas()
             setTimeout(() => fitView({ padding: 0.22, maxZoom: 0.85 }), 40)
           }}
-          className="grid size-8 place-items-center rounded-lg text-ink-500 ring-1 ring-ink-800 transition hover:bg-ink-850 hover:text-ink-200"
-          title="Reset to the seeded demo canvas"
+          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-500 ring-1 ring-ink-800 transition hover:bg-ink-850 hover:text-ink-200"
+          title="Discard this canvas and restore the seeded demo"
         >
           <RotateCcw className="size-3.5" />
+          Reset demo
         </button>
       </div>
     </header>

@@ -9,9 +9,11 @@ import {
 } from '@xyflow/react'
 import { nanoid } from 'nanoid'
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 
 import { provider, type AnalyzeTarget, type ChatRequest } from '@/ai/provider'
+import { quoteOccursIn } from '@/ai/llm/heuristic'
+import { idbStorage } from '@/data/idbStorage'
 import { seedCanvas } from '@/data/seed'
 import { correctionDigest, threadDigest } from '@/lib/digest'
 import type {
@@ -63,12 +65,19 @@ interface CanvasState {
   selectedNodeId: string | null
   misconceptions: Misconception[]
   lastRun: AnalyzerRun | null
+  /** Stamp written on every persist. Used to compare with a Firestore copy. */
+  savedAt: number
 
   /** In-flight assistant text, kept out of `nodes` so streaming doesn't rerender the canvas. */
   streamDraft: { nodeId: string; sessionId: string; text: string } | null
   /** Fading traces of removed correction nodes. Never persisted. */
   ghosts: NodeGhost[]
   analyzing: boolean
+  /**
+   * Analyzer review overlay. Findings stay in the ledger; this flag only
+   * controls whether fix nodes, status colours, and the mistake graph are shown.
+   */
+  reviewMode: boolean
   sidebarTab: 'chat' | 'mistakes'
   /** Message the user asked to jump to from the Mistake Graph. */
   highlightMessageId: string | null
@@ -88,6 +97,8 @@ interface CanvasState {
   toggleSessionExpanded: (nodeId: string, sessionId: string) => void
 
   runAnalyzer: () => Promise<number>
+  enterReview: () => void
+  exitReview: () => void
   resolveMisconception: (id: string) => Promise<void>
   dismissGhost: (id: string) => void
   jumpToEvidence: (m: Misconception) => void
@@ -162,10 +173,57 @@ function deriveStatus(node: FlowNode, misconceptions: Misconception[]): MasteryS
   return turns === 0 ? 'unexplored' : 'solid'
 }
 
+function knownClaimKey(m: Misconception): string {
+  // Older persisted rows predate `claimId`; recover it from the instance id.
+  return `${m.claimId ?? m.id.split('__')[0]}:${m.nodeId}`
+}
+
+function messagesOn(node: FlowNode): Message[] {
+  return [...node.data.sessions.flatMap((s) => s.messages), ...node.data.active.messages]
+}
+
 function recolor(nodes: FlowNode[], misconceptions: Misconception[]): FlowNode[] {
   return nodes.map((n) => {
     const status = deriveStatus(n, misconceptions)
     return status === n.data.status ? n : { ...n, data: { ...n.data, status } }
+  })
+}
+
+/**
+ * React Flow attaches measured size and internal lookups after mount. Those
+ * must not go into storage — `internals` can circular-reference the user node,
+ * JSON.stringify throws, and persist fails silently. Firestore also rejects
+ * `undefined` fields, so only defined keys are copied.
+ */
+export function toStoredNodes(nodes: FlowNode[]): FlowNode[] {
+  return nodes.map((n) => {
+    const stored: FlowNode = {
+      id: n.id,
+      type: n.type,
+      position: { x: n.position.x, y: n.position.y },
+      data: n.data,
+    }
+    if (n.selected != null) stored.selected = n.selected
+    if (n.hidden != null) stored.hidden = n.hidden
+    if (n.sourcePosition != null) stored.sourcePosition = n.sourcePosition
+    if (n.targetPosition != null) stored.targetPosition = n.targetPosition
+    return stored
+  })
+}
+
+export function toStoredEdges(edges: Edge[]): Edge[] {
+  return edges.map((e) => {
+    const stored: Edge = {
+      id: e.id,
+      source: e.source,
+      target: e.target,
+    }
+    if (e.sourceHandle != null) stored.sourceHandle = e.sourceHandle
+    if (e.targetHandle != null) stored.targetHandle = e.targetHandle
+    if (e.type != null) stored.type = e.type
+    if (e.animated != null) stored.animated = e.animated
+    if (e.className != null) stored.className = e.className
+    return stored
   })
 }
 
@@ -229,8 +287,10 @@ export const useCanvas = create<CanvasState>()(
       streamDraft: null,
       ghosts: [],
       analyzing: false,
+      reviewMode: false,
       sidebarTab: 'chat',
       highlightMessageId: null,
+      savedAt: 0,
 
       onNodesChange: (changes) =>
         set((s) => ({ nodes: applyNodeChanges(changes, s.nodes) })),
@@ -398,7 +458,7 @@ export const useCanvas = create<CanvasState>()(
             nodeTitle: n.data.title,
             messages: [...n.data.sessions.flatMap((s) => s.messages), ...n.data.active.messages],
           }))
-        const known = new Set(misconceptions.map((m) => `${m.id.split('__')[0]}:${m.nodeId}`))
+        const known = new Set(misconceptions.map(knownClaimKey))
 
         try {
           const drafts = await provider.analyze(targets, known)
@@ -410,6 +470,10 @@ export const useCanvas = create<CanvasState>()(
             drafts.forEach((draft, i) => {
               const parent = nextNodes.find((n) => n.id === draft.nodeId)
               if (!parent) return
+
+              const evidenceMsg = messagesOn(parent).find((m) => m.id === draft.evidenceMessageId)
+              if (!evidenceMsg || evidenceMsg.role !== 'user') return
+              if (!quoteOccursIn(draft.evidenceQuote, evidenceMsg)) return
 
               const misId = `${draft.ruleId}__${nanoid(5)}`
               const fixId = nanoid(8)
@@ -453,6 +517,7 @@ export const useCanvas = create<CanvasState>()(
 
               found.push({
                 id: misId,
+                claimId: draft.ruleId,
                 nodeId: draft.nodeId,
                 concept: draft.concept,
                 belief: draft.belief,
@@ -491,6 +556,7 @@ export const useCanvas = create<CanvasState>()(
                 found: found.map((m) => m.id),
               },
               sidebarTab: found.length > 0 ? 'mistakes' : s.sidebarTab,
+              reviewMode: true,
             }
           })
 
@@ -498,6 +564,24 @@ export const useCanvas = create<CanvasState>()(
         } finally {
           set({ analyzing: false })
         }
+      },
+
+      enterReview: () =>
+        set({ reviewMode: true, sidebarTab: 'mistakes' }),
+
+      exitReview: () => {
+        const s = get()
+        const selected = s.nodes.find((n) => n.id === s.selectedNodeId)
+        const parentId =
+          selected?.data.kind === 'correction'
+            ? (s.misconceptions.find((m) => m.correctionNodeId === selected.id)?.nodeId ?? null)
+            : s.selectedNodeId
+        set({
+          reviewMode: false,
+          sidebarTab: 'chat',
+          selectedNodeId: parentId,
+          highlightMessageId: null,
+        })
       },
 
       /**
@@ -600,6 +684,7 @@ export const useCanvas = create<CanvasState>()(
 
       jumpToEvidence: (m) =>
         set({
+          reviewMode: true,
           selectedNodeId: m.nodeId,
           sidebarTab: 'chat',
           highlightMessageId: m.evidenceMessageId ?? null,
@@ -613,19 +698,26 @@ export const useCanvas = create<CanvasState>()(
           streamDraft: null,
           ghosts: [],
           analyzing: false,
+          reviewMode: false,
           sidebarTab: 'chat',
           highlightMessageId: null,
+          savedAt: Date.now(),
         }),
     }),
     {
-      // v2 drops the hard-coded edge stroke colours that v1 persisted.
-      name: 'flowai.canvas.v2',
+      // v3: IndexedDB. v2 lived in localStorage and was evicted once MiniLM
+      // vectors filled the ~5 MB quota, which is why new nodes vanished on
+      // refresh. idbStorage copies v2 across on first read.
+      name: 'flowai.canvas.v3',
+      storage: createJSONStorage(() => idbStorage),
       partialize: (s) => ({
-        nodes: s.nodes,
-        edges: s.edges,
+        nodes: toStoredNodes(s.nodes),
+        edges: toStoredEdges(s.edges),
         selectedNodeId: s.selectedNodeId,
         misconceptions: s.misconceptions,
         lastRun: s.lastRun,
+        reviewMode: s.reviewMode,
+        savedAt: Date.now(),
       }),
     },
   ),

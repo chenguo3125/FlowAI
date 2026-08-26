@@ -12,7 +12,7 @@ import { BadgeCheck } from 'lucide-react'
 import { useCallback, useMemo } from 'react'
 
 import { TopicNode } from '@/components/TopicNode'
-import { STATUS_META } from '@/lib/status'
+import { STATUS_META, studyStatus } from '@/lib/status'
 import { GHOST_TTL, NODE_WIDTH, useCanvas, type FlowNode } from '@/store/canvasStore'
 import { useTheme } from '@/store/themeStore'
 import type { MasteryStatus } from '@/types'
@@ -26,6 +26,7 @@ export function Canvas() {
   const selectNode = useCanvas((s) => s.selectNode)
   const addNode = useCanvas((s) => s.addNode)
   const selectedNodeId = useCanvas((s) => s.selectedNodeId)
+  const reviewMode = useCanvas((s) => s.reviewMode)
 
   const theme = useTheme((s) => s.theme)
 
@@ -41,6 +42,21 @@ export function Canvas() {
         return n.selected === selected ? n : { ...n, selected }
       }),
     [nodes, selectedNodeId],
+  )
+
+  const visibleNodes = useMemo(() => {
+    if (reviewMode) return decorated
+    return decorated.filter((n) => n.data.kind !== 'correction')
+  }, [decorated, reviewMode])
+
+  const hiddenIds = useMemo(() => {
+    if (reviewMode) return new Set<string>()
+    return new Set(nodes.filter((n) => n.data.kind === 'correction').map((n) => n.id))
+  }, [nodes, reviewMode])
+
+  const visibleEdges = useMemo(
+    () => (hiddenIds.size === 0 ? edges : edges.filter((e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target))),
+    [edges, hiddenIds],
   )
 
   const onNodeClick = useCallback<NodeMouseHandler<FlowNode>>(
@@ -61,8 +77,8 @@ export function Canvas() {
   return (
     <div className="relative h-full w-full">
       <ReactFlow
-        nodes={decorated}
-        edges={edges}
+        nodes={visibleNodes}
+        edges={visibleEdges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -93,7 +109,11 @@ export function Canvas() {
           position="top-right"
           pannable
           zoomable
-          nodeClassName={(n) => `minimap-${(n as FlowNode).data.status}`}
+          nodeClassName={(n) => {
+            const node = n as FlowNode
+            const status = reviewMode ? node.data.status : studyStatus(node.data)
+            return `minimap-${status}`
+          }}
           nodeStrokeWidth={0}
           nodeBorderRadius={4}
         />
@@ -110,8 +130,9 @@ export function Canvas() {
  * graph — it is feedback, not a member of the network.
  */
 function Ghosts() {
+  const reviewMode = useCanvas((s) => s.reviewMode)
   const ghosts = useCanvas((s) => s.ghosts)
-  if (ghosts.length === 0) return null
+  if (!reviewMode || ghosts.length === 0) return null
 
   return (
     <ViewportPortal>
@@ -143,16 +164,25 @@ function Ghosts() {
 }
 
 function Legend() {
+  const reviewMode = useCanvas((s) => s.reviewMode)
   const nodes = useCanvas((s) => s.nodes)
   const counts = useMemo(() => {
     const acc: Record<MasteryStatus, number> = { unexplored: 0, solid: 0, shaky: 0, gap: 0 }
-    for (const n of nodes) acc[n.data.status] += 1
+    for (const n of nodes) {
+      if (!reviewMode && n.data.kind === 'correction') continue
+      const status = reviewMode ? n.data.status : studyStatus(n.data)
+      acc[status] += 1
+    }
     return acc
-  }, [nodes])
+  }, [nodes, reviewMode])
+
+  const statuses: MasteryStatus[] = reviewMode
+    ? ['solid', 'shaky', 'gap', 'unexplored']
+    : ['solid', 'unexplored']
 
   return (
     <div className="pointer-events-none absolute bottom-4 left-4 flex items-center gap-3 rounded-xl glass px-3 py-2 ring-1 ring-ink-700">
-      {(['solid', 'shaky', 'gap', 'unexplored'] as MasteryStatus[]).map((status) => (
+      {statuses.map((status) => (
         <div key={status} className="flex items-center gap-1.5">
           <span className={`size-2 rounded-full ${STATUS_META[status].dot}`} />
           <span className="text-[11px] text-ink-400">{STATUS_META[status].label}</span>
@@ -160,7 +190,7 @@ function Legend() {
         </div>
       ))}
       <span className="ml-1 border-l border-ink-700 pl-3 text-[11px] text-ink-500">
-        double-click canvas to add a node
+        {reviewMode ? 'reviewing gaps · back to canvas in the top bar' : 'double-click canvas to add a node'}
       </span>
     </div>
   )

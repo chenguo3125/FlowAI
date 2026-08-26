@@ -12,7 +12,7 @@ import {
 import { memo } from 'react'
 
 import { NODE_WIDTH, useCanvas, type FlowNode } from '@/store/canvasStore'
-import { STATUS_META } from '@/lib/status'
+import { STATUS_META, studyStatus } from '@/lib/status'
 import { plural, relativeTime, stripMd, truncate } from '@/lib/text'
 import type { Session } from '@/types'
 
@@ -28,12 +28,15 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
   const selectNode = useCanvas((s) => s.selectNode)
   const deleteNode = useCanvas((s) => s.deleteNode)
   const setSidebarTab = useCanvas((s) => s.setSidebarTab)
+  const enterReview = useCanvas((s) => s.enterReview)
+  const reviewMode = useCanvas((s) => s.reviewMode)
   const streaming = useCanvas((s) => s.streamDraft?.nodeId === id)
   const openCount = useCanvas(
     (s) => s.misconceptions.filter((m) => m.nodeId === id && !m.resolved).length,
   )
 
-  const meta = STATUS_META[data.status]
+  const displayStatus = reviewMode ? data.status : studyStatus(data)
+  const meta = STATUS_META[displayStatus]
   const isFix = data.kind === 'correction'
   const liveTurns = data.active.messages.length
   const archivedTurns = data.sessions.reduce((n, s) => n + s.messages.length, 0)
@@ -46,7 +49,7 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
         isFix ? 'ring-fix/50' : meta.ring,
         meta.glow,
         selected ? 'ring-2 ring-accent' : '',
-        data.status === 'gap' && !selected ? 'animate-alert' : '',
+        data.status === 'gap' && reviewMode && !selected ? 'animate-alert' : '',
       ].join(' ')}
     >
       <Handle type="target" position={Position.Top} />
@@ -129,11 +132,12 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
               {archivedTurns + liveTurns} msgs
             </span>
           )}
-          {openCount > 0 && (
+          {reviewMode && openCount > 0 && (
             <button
               className={`nodrag inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-semibold ring-1 ${meta.chip}`}
               onClick={(e) => {
                 e.stopPropagation()
+                enterReview()
                 selectNode(id)
                 setSidebarTab('mistakes')
               }}
@@ -142,7 +146,7 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
               {plural(openCount, 'gap')}
             </button>
           )}
-          {data.status === 'unexplored' && (
+          {displayStatus === 'unexplored' && (
             <span className="inline-flex items-center gap-1 text-[10.5px] text-ink-500">
               <Sparkles className="size-2.5" />
               untouched

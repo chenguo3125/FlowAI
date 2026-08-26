@@ -52,31 +52,38 @@ has something to find.
 
 ## Swapping in a real model
 
-Everything model-facing sits behind one interface in `src/ai/provider.ts`:
+Copy `.env.example` to `.env.local` and set `FLOWAI_API_KEY`. `.env.local` is gitignored; the key
+is read only by the Vite dev server and never bundled into the client.
 
-```ts
-interface AIProvider {
-  stream(req: ChatRequest, onToken: (chunk: string) => void): Promise<string>
-  summarize(req: SummarizeRequest): Promise<{ title: string; summary: string }>
-  summarizeCorrection(req: CorrectionSummarizeRequest): Promise<{ title: string; summary: string }>
-  analyze(targets: AnalyzeTarget[], known: Set<string>): Promise<MisconceptionDraft[]>
-  suggestedPrompts(nodeTitle: string): string[]
-}
+```bash
+cp .env.example .env.local
 ```
 
-`ChatRequest` *is* the isolation guarantee: one node's live thread, its closed threads as summaries,
-and ancestor titles as a breadcrumb — never another node's transcript. `buildContext` in the store
-assembles it once and both the real call and the sidebar meter use it, so the number on screen
-cannot drift from the payload. Implement the interface against any provider and change the last line
-of `provider.ts` — the UI imports `provider`, never the mock.
+Leave the key blank and chat stays on the simulated tutor. The misconception analyzer still runs:
+Tier 1 is a local MiniLM model (hashed n-grams in Node, or if the model hub is unreachable).
 
-`analyze` is the piece that changes character with a real model. The mock matches regex rules from
-`src/ai/knowledge.ts`; a real implementation would send each node's transcript and ask for
-structured findings in the same `MisconceptionDraft` shape.
+The composed provider in `src/ai/provider.ts`:
 
-`summarizeCorrection` is deliberately separate from `summarize`: recapping a topic and recording
-*what you believed versus what corrected it* want different prompts, and only the latter is useful
-at revision time.
+- **Chat / summaries** — mock until a key is present, live model after.
+- **Analyze** — always the tiered pipeline, key or not.
+
+```
+Tier 0  skip claims already on the canvas for that node (resolved or not)
+Tier 1  local embeddings ∪ curated regexes, learner turns only
+Tier 2  LLM judge when a key is present; heuristic confirm otherwise
+```
+
+The LLM is a judge, not a scanner: it is asked "does the learner hold this claim?" and must cite a
+message id. A verdict whose quote is not a real substring of that message is discarded. Node colour
+is still derived from the misconception ledger (`unexplored` / `solid` / `shaky` / `gap`) — the
+model never paints the canvas.
+
+`ChatRequest` is the isolation guarantee: one node's live thread, its closed threads as summaries,
+and ancestor titles as a breadcrumb. `buildContext` in the store assembles it once and both the
+real call and the sidebar meter use it.
+
+`summarizeCorrection` stays separate from `summarize`: recapping a topic and recording what you
+believed versus what corrected it want different prompts.
 
 ### Assuming the provider will fail
 
@@ -131,7 +138,9 @@ that dark mode does not need.
 src/
   ai/
     knowledge.ts     Canned CS domain content + 9 misconception rules
-    provider.ts      AIProvider interface, mock implementation, context boundary
+    provider.ts      Composed AIProvider (mock chat, live chat, shared analyze)
+    embedder.ts      MiniLM in-browser, hashed n-grams as fallback
+    llm/             Chat proxy client, Tier 1/2 analyze, heuristic confirm
   components/
     Canvas.tsx       React Flow surface, minimap, status legend
     TopicNode.tsx    Topic card + accordion summary bubbles
@@ -139,25 +148,52 @@ src/
     MistakePanel.tsx Mistake Graph findings, evidence jumps, drill links
     TopBar.tsx       Analyzer trigger, canvas stats
     Markdown.tsx     Message renderer (GFM tables, code, lists)
-  data/seed.ts       Pre-walked CS-fundamentals canvas
+    PersistGate.tsx  Waits for IndexedDB before painting the canvas
+  data/
+    seed.ts          Pre-walked CS-fundamentals canvas
+    firebase.ts      Optional Firebase init from VITE_FIREBASE_* env
+    remoteCanvas.ts  Firestore pull/push for the canvas document
+    idbStorage.ts    Zustand persist adapter
   lib/digest.ts      Deterministic thread summaries, used when the model is unavailable
+  lib/idb.ts         IndexedDB key-value helper
   store/
-    canvasStore.ts   Zustand store, localStorage-persisted
+    canvasStore.ts   Zustand store, IndexedDB-persisted (Firestore when configured)
     themeStore.ts    Theme preference, system listener, canvas colour tokens
-  lib/               Status palette, text helpers
+vite/
+  llmProxy.ts        Dev-server chat proxy; holds the model API key out of the bundle
 ```
 
 Node colour is always derived from open misconceptions rather than stored, so the canvas cannot
 drift out of sync with the Mistake Graph. Streaming text is held outside the node tree so tokens do
 not re-render the canvas.
 
-State persists to `localStorage` under `flowai.canvas.v2`. The reset button in the top bar restores
-the seeded canvas. Correction-node ghosts are deliberately left out of the persisted slice — they
-are a moment of feedback, not canvas state, so a reload clears them.
+State persists to **IndexedDB** (`flowai.canvas.v3`). The reset button in the top bar restores the
+seeded canvas. Correction-node ghosts are deliberately left out of the persisted slice — they are a
+moment of feedback, not canvas state, so a reload clears them.
+
+There is no required backend. If Firebase web config is present in `.env.local`, the same snapshot
+also syncs to `canvases/{deviceId}` in Firestore. Without it, a refresh still restores the canvas
+from this browser.
 
 `vite.config.ts` sets `server.watch.usePolling`. FSEvents does not reach Vite in some environments,
 and without polling the module graph never invalidates: edits serve stale with no HMR event at all.
 
+## Firebase (optional)
+
+```bash
+npm install firebase   # already in package.json
+```
+
+1. Create a Firebase project and a web app. Enable **Cloud Firestore**.
+2. Paste the six web config values into `.env.local` as `VITE_FIREBASE_*` (see `.env.example`).
+3. In Firestore → Rules, paste `firestore.rules` from this repo. The prototype rule is open by
+   device id; put Firebase Auth in front before anyone else uses this.
+4. Restart `npm run dev`. The subtitle under the logo switches from *Canvas saved in this browser*
+   to *Canvas syncs to Firestore*.
+
+These `VITE_` values are the public web config Firebase expects in the client. They are not the
+model key — that stays unprefixed as `FLOWAI_API_KEY` and never enters the bundle.
+
 ## Stack
 
-Vite 8 · React 19 · TypeScript · React Flow (`@xyflow/react`) · Zustand · Tailwind CSS 4
+Vite 8 · React 19 · TypeScript · React Flow (`@xyflow/react`) · Zustand · Tailwind CSS 4 · Firebase

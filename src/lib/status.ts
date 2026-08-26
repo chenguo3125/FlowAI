@@ -1,5 +1,14 @@
 import type { MasteryStatus } from '@/types'
 
+export function studyStatus(data: {
+  sessions: { messages: unknown[] }[]
+  active: { messages: unknown[] }
+}): MasteryStatus {
+  const turns =
+    data.active.messages.length + data.sessions.reduce((n, s) => n + s.messages.length, 0)
+  return turns === 0 ? 'unexplored' : 'solid'
+}
+
 export const STATUS_META: Record<
   MasteryStatus,
   { label: string; dot: string; ring: string; glow: string; text: string; chip: string }

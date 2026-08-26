@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Prototype rule: any client that knows a device id can read/write that
+    // canvas. Replace with Firebase Auth before this is used by real users.
+    match /canvases/{deviceId} {
+      allow read, write: if true;
+    }
+  }
+}
