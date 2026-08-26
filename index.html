@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/flow.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlowAI — The Asymmetric Learning Canvas</title>
+    <script>
+      // Runs before first paint so the canvas never flashes the wrong palette.
+      // Mirrors resolvePref() in src/store/themeStore.ts.
+      ;(function () {
+        try {
+          var pref = localStorage.getItem('flowai.theme')
+          if (pref !== 'light' && pref !== 'dark') {
+            pref = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+          }
+          document.documentElement.classList.add(pref)
+          document.documentElement.style.colorScheme = pref
+        } catch (_) {
+          document.documentElement.classList.add('dark')
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
