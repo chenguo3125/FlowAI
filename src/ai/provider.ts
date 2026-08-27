@@ -134,7 +134,7 @@ export const mockProvider: AIProvider = {
           const key = `${rule.id}:${target.nodeId}`
           if (knownRuleKeys.has(key)) continue
           if (drafts.some((d) => d.ruleId === rule.id && d.nodeId === target.nodeId)) continue
-          if (!rule.pattern.test(msg.content)) continue
+          if (!rule.pattern?.test(msg.content)) continue
           drafts.push(toDraft(rule, target.nodeId, msg))
         }
       }
@@ -149,7 +149,7 @@ export const mockProvider: AIProvider = {
 }
 
 function toDraft(rule: MisconceptionRule, nodeId: string, msg: Message): MisconceptionDraft {
-  const hit = rule.pattern.exec(msg.content)
+  const hit = rule.pattern?.exec(msg.content)
   const quote = (hit?.[0] ?? msg.content).trim()
   return {
     ruleId: rule.id,

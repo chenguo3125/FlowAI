@@ -20,7 +20,7 @@ const userMessages = nodes.flatMap((n) =>
 
 let missing = 0
 for (const rule of MISCONCEPTION_RULES) {
-  const hit = userMessages.find((m) => rule.pattern.test(m.content))
+  const hit = userMessages.find((m) => rule.pattern?.test(m.content))
   if (hit) {
     console.log(`  ok    ${rule.id.padEnd(28)} ← ${hit.node}`)
   } else {
@@ -33,10 +33,20 @@ console.log(
   `\n${MISCONCEPTION_RULES.length - missing}/${MISCONCEPTION_RULES.length} rules reachable from ${userMessages.length} seeded learner messages`,
 )
 
-const selfMatching = MISCONCEPTION_RULES.filter((r) => r.pattern.test(r.drillQuestion))
+const selfMatching = MISCONCEPTION_RULES.filter((r) => r.pattern?.test(r.drillQuestion))
 console.log(
   `${selfMatching.length}/${MISCONCEPTION_RULES.length} drill questions match their own rule — correction nodes must stay out of the analyzer's scan`,
 )
+
+// Tier 1 narrows the library by `topicHint`. A curated rule without one is only
+// reachable on nodes whose topic cannot be identified at all, which is silent
+// dead weight rather than a visible failure — so it is asserted here.
+const untopiced = MISCONCEPTION_RULES.filter((r) => !r.topicHint)
+if (untopiced.length > 0) {
+  console.log(`  FAIL missing topicHint: ${untopiced.map((r) => r.id).join(', ')}`)
+  process.exit(1)
+}
+console.log(`  ok    every curated rule carries a topicHint for Tier 0 scoping`)
 
 const targets = nodes
   .filter((n) => n.data.kind !== 'correction')

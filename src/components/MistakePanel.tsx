@@ -175,7 +175,7 @@ function Card({
             high ? 'bg-gap/15 text-gap ring-gap/35' : 'bg-shaky/15 text-shaky ring-shaky/35'
           }`}
         >
-          {high ? 'high' : 'medium'}
+          {high ? 'gap' : 'shaky'}
         </span>
         <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-ink-200">
           {m.concept}

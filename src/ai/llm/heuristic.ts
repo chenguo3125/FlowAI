@@ -11,6 +11,11 @@ import type { Message } from '@/types'
  * MiniLM and only above a strict cosine: hashed n-grams confuse shared words
  * like "always" and "n log n" across unrelated claims, so they never
  * auto-confirm without a judge.
+ *
+ * A leading question is confirmed at reduced severity rather than dropped, so a
+ * learner floating a wrong premise turns the node shaky instead of leaving it
+ * green. `deriveStatus` in the store maps `high` to a gap and `medium` to shaky,
+ * so severity is the whole mechanism — no fourth status is involved.
  */
 
 /** MiniLM-only floor for an embedding-only confirm. N-grams skip this path. */
@@ -49,7 +54,7 @@ export function heuristicConfirm(nodeId: string, candidates: Candidate[]): Misco
 function quoteFrom(candidate: Candidate): string | null {
   const message = candidate.message
   if (candidate.viaRegex) {
-    const hit = candidate.rule.pattern.exec(message.content)
+    const hit = candidate.rule.pattern?.exec(message.content)
     const span = (hit?.[0] ?? message.content).trim()
     return clip(span)
   }
@@ -70,7 +75,7 @@ function toDraft(nodeId: string, candidate: Candidate, evidenceQuote: string): M
     concept: rule.concept,
     belief: rule.belief,
     correction: rule.correction,
-    severity: rule.severity,
+    severity: candidate.probing ? 'medium' : rule.severity,
     evidenceMessageId: message.id,
     evidenceQuote,
     fixTitle: rule.fixTitle,

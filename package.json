@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "check": "tsx --tsconfig tsconfig.app.json scripts/check-analyzer.ts",
+    "probe": "tsx --tsconfig tsconfig.app.json scripts/probe-analyzer.ts",
     "preview": "vite preview"
   },
   "dependencies": {

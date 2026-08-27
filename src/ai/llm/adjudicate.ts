@@ -26,12 +26,17 @@ const CACHE_KEY = 'flowai.verdicts.v1'
 const SYSTEM = `You judge whether a learner holds a specific misconception.
 
 You are given candidate claims and the learner's own sentences. For each claim decide:
-- "confirmed": a sentence shows the learner actually believes the claim.
+- "confirmed": a sentence asserts the claim as fact.
+- "probing": a sentence puts the claim forward as a leading question, looking for
+  confirmation of a premise that happens to be wrong. "So A* only works on trees?"
+  and "Is a BST always log n?" are probing. The learner is not certain, but they are
+  carrying the wrong premise and it will harden if nobody corrects it.
 - "absent": no sentence supports it, or the learner states the correct view.
-- "uncertain": the sentence is ambiguous, hypothetical, or a question rather than a belief.
+- "uncertain": the sentence is genuinely ambiguous or hypothetical, with no premise
+  either way.
 
 Rules that matter more than being helpful:
-- A question ("is a BST always log n?") is NOT a confirmed belief. It is uncertain at most.
+- An open question with no embedded claim ("how does A* work?") is absent, not probing.
 - A learner correcting themselves mid-thought does not hold the misconception.
 - evidenceMessageId MUST be copied exactly from a supplied message id.
 - evidenceQuote MUST be copied verbatim from that message, and must be the span that
@@ -40,7 +45,7 @@ Rules that matter more than being helpful:
 
 interface Verdict {
   claimId: string
-  verdict: 'confirmed' | 'absent' | 'uncertain'
+  verdict: 'confirmed' | 'probing' | 'absent' | 'uncertain'
   confidence: number
   evidenceMessageId: string
   evidenceQuote: string
@@ -60,8 +65,11 @@ const SCHEMA = {
           additionalProperties: false,
           required: ['claimId', 'verdict', 'confidence', 'evidenceMessageId', 'evidenceQuote'],
           properties: {
-            claimId: { type: 'string' },
-            verdict: { type: 'string', enum: ['confirmed', 'absent', 'uncertain'] },
+                    claimId: { type: 'string' },
+                    verdict: {
+                      type: 'string',
+                      enum: ['confirmed', 'probing', 'absent', 'uncertain'],
+                    },
             confidence: { type: 'number' },
             evidenceMessageId: { type: 'string' },
             evidenceQuote: { type: 'string' },
@@ -131,7 +139,8 @@ export async function adjudicate(
 
   for (const candidate of candidates) {
     const verdict = cache![cacheKey(candidate)]
-    if (!verdict || verdict.verdict !== 'confirmed') continue
+    if (!verdict) continue
+    if (verdict.verdict !== 'confirmed' && verdict.verdict !== 'probing') continue
     if (verdict.confidence < CONFIDENCE_FLOOR) continue
     if (seenRules.has(candidate.rule.id)) continue
 
@@ -139,7 +148,10 @@ export async function adjudicate(
     if (!quote) continue
 
     seenRules.add(candidate.rule.id)
-    confirmed.push(toDraft(candidate.rule, nodeId, candidate.message.id, quote))
+    // A probed premise is uncertainty, not a settled gap, so it lands as shaky
+    // however severe the claim is in general.
+    const severity = verdict.verdict === 'probing' ? 'medium' : candidate.rule.severity
+    confirmed.push(toDraft(candidate.rule, nodeId, candidate.message.id, quote, severity))
   }
 
   return confirmed
@@ -201,6 +213,7 @@ function toDraft(
   nodeId: string,
   evidenceMessageId: string,
   evidenceQuote: string,
+  severity: MisconceptionDraft['severity'],
 ): MisconceptionDraft {
   return {
     ruleId: rule.id,
@@ -208,7 +221,7 @@ function toDraft(
     concept: rule.concept,
     belief: rule.belief,
     correction: rule.correction,
-    severity: rule.severity,
+    severity,
     evidenceMessageId,
     evidenceQuote,
     fixTitle: rule.fixTitle,

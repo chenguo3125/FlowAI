@@ -177,10 +177,21 @@ export const TOPICS: TopicEntry[] = [
 
 export interface MisconceptionRule {
   id: string
-  /** Fires only if the learner's own words match. */
-  pattern: RegExp
-  /** Only consider messages on nodes whose topic matches, if set. */
+  /**
+   * Fires only if the learner's own words match. Absent on mined claims — a
+   * model-authored regex is a liability, so mined claims reach Tier 2 on
+   * embedding similarity alone.
+   */
+  pattern?: RegExp
+  /**
+   * `TopicEntry.id` this claim belongs to. Scopes Tier 1 so the comparison pool
+   * stays about a dozen claims however large the mined library grows.
+   */
   topicHint?: string
+  /** Curated claims ship in this file; mined ones are generated per topic. */
+  origin?: 'curated' | 'mined'
+  /** Normalised node title a mined claim came from, so a topic is mined once. */
+  topicSignature?: string
   concept: string
   belief: string
   correction: string
@@ -195,6 +206,7 @@ export interface MisconceptionRule {
 export const MISCONCEPTION_RULES: MisconceptionRule[] = [
   {
     id: 'hash-always-o1',
+    topicHint: 'hash-tables',
     pattern:
       /hash[^.?!]*\b(always|guarantee\w*|constant time no matter|never slow)\b|\b(always|guaranteed)\b[^.?!]*hash[^.?!]*o\(?1\)?/i,
     concept: 'Average case vs worst case',
@@ -210,6 +222,7 @@ export const MISCONCEPTION_RULES: MisconceptionRule[] = [
   },
   {
     id: 'recursion-faster',
+    topicHint: 'recursion',
     pattern:
       /recursi\w*[^.?!]*\b(faster|more efficient|quicker|better performance)\b[^.?!]*\b(loop|iterat\w+|for)\b|\b(loop|iterat\w+)\b[^.?!]*\bslower\b[^.?!]*recursi/i,
     concept: 'Recursion as control flow, not speed',
@@ -224,6 +237,7 @@ export const MISCONCEPTION_RULES: MisconceptionRule[] = [
   },
   {
     id: 'binary-search-unsorted',
+    topicHint: 'binary-search',
     pattern:
       /binary search[^.?!]*\b(any|unsorted|not sorted|whatever) (array|list|data|collection)\b|\b(unsorted|not sorted)\b[^.?!]*binary search|binary search[^.?!]*(dont|don't|do not|doesnt|doesn't) (need|require)[^.?!]*sort/i,
     concept: 'Preconditions are part of the algorithm',
@@ -238,6 +252,7 @@ export const MISCONCEPTION_RULES: MisconceptionRule[] = [
   },
   {
     id: 'quicksort-always-nlogn',
+    topicHint: 'sorting',
     pattern:
       /quick ?sort[^.?!]*\b(always|guarantee\w*)\b[^.?!]*(n ?log ?n|nlogn)|\b(always|guaranteed)\b[^.?!]*quick ?sort[^.?!]*(n ?log ?n|nlogn)|quick ?sort[^.?!]*\bnever\b[^.?!]*o\(?n\^?2\)?/i,
     concept: 'Average case vs worst case',
@@ -252,6 +267,7 @@ export const MISCONCEPTION_RULES: MisconceptionRule[] = [
   },
   {
     id: 'linked-list-random-access',
+    topicHint: 'arrays-lists',
     pattern:
       /linked list[^.?!]*\b(o\(?1\)?|constant|fast|instant)\b[^.?!]*\b(access|index|lookup|get)\b|\b(index|access)\w*\b[^.?!]*linked list[^.?!]*o\(?1\)?/i,
     concept: 'Pointer chasing vs address arithmetic',
@@ -266,6 +282,7 @@ export const MISCONCEPTION_RULES: MisconceptionRule[] = [
   },
   {
     id: 'bigo-wallclock',
+    topicHint: 'big-o',
     pattern:
       /o\(?n ?log ?n\)?[^.?!]*\balways\b[^.?!]*\b(faster|better)\b|\bbig[- ]?o\b[^.?!]*\b(exact|actual|real)\b[^.?!]*\b(time|speed|seconds|runtime)\b|lower big[- ]?o[^.?!]*\balways\b[^.?!]*\bfaster\b/i,
     concept: 'Asymptotic growth vs measured runtime',
@@ -280,6 +297,7 @@ export const MISCONCEPTION_RULES: MisconceptionRule[] = [
   },
   {
     id: 'memo-tabulation-same',
+    topicHint: 'dp',
     pattern:
       /memoi\w*[^.?!]*\b(same as|identical to|no different|exactly like)\b[^.?!]*tabulation|tabulation[^.?!]*\b(same as|identical to|no different)\b[^.?!]*memoi/i,
     concept: 'Top-down vs bottom-up DP',
@@ -294,6 +312,7 @@ export const MISCONCEPTION_RULES: MisconceptionRule[] = [
   },
   {
     id: 'bfs-weighted',
+    topicHint: 'graphs',
     pattern:
       /\bbfs\b[^.?!]*shortest path[^.?!]*\b(weight|weighted|cost)\b|\bbfs\b[^.?!]*\b(always|any graph)\b[^.?!]*shortest|shortest path[^.?!]*\bbfs\b[^.?!]*weighted/i,
     concept: 'Unweighted vs weighted shortest paths',
@@ -308,6 +327,7 @@ export const MISCONCEPTION_RULES: MisconceptionRule[] = [
   },
   {
     id: 'bst-always-logn',
+    topicHint: 'trees',
     pattern:
       /\b(bst|binary search tree)\b[^.?!]*\b(always|guarantee\w*)\b[^.?!]*(log ?n|o\(?log)|\b(always|guaranteed)\b[^.?!]*(bst|binary search tree)[^.?!]*log ?n/i,
     concept: 'Balance is not automatic',
@@ -330,6 +350,19 @@ export const GENERIC_REPLIES = {
     'Comparisons here almost always come down to what you optimise and what you give up.\n\nList the operations you will actually perform and how often, then price each option against *that* mix rather than against a generic benchmark. The winner usually changes with the workload.',
   default:
     "Let me anchor this. Say what you already believe about it, even loosely — a half-formed version is far more useful to correct than a blank.\n\nI will then tell you which part holds, which part breaks, and where the boundary is. That boundary is usually the thing worth remembering.",
+}
+
+/**
+ * Every topic with at least one trigger hit.
+ *
+ * Distinct from `matchTopic` on purpose. Picking a reply needs one winner; scoping
+ * the claim library needs the union, because a single sentence legitimately spans
+ * topics — "a BST always gives log n, so it beats a list for anything sorted" hits
+ * trees, sorting, and arrays, and narrowing it to the first of those by trigger
+ * count would silently hide the claim that actually matches.
+ */
+export function matchTopics(text: string): TopicEntry[] {
+  return TOPICS.filter((topic) => topic.triggers.some((re) => re.test(text)))
 }
 
 /** Best-matching topic by trigger hits, or undefined when nothing is close. */
